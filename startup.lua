@@ -17,7 +17,7 @@ if fs.exists(conf_path) then
 end
 
 if id == nil then
-    local r = http.get(remote .. "/newId")
+    local r = http.get("http://"..remote .. "/newId")
     id = r.readAll()
     id = tonumber(id)
 end
@@ -31,11 +31,17 @@ if mode == nil then
     mode = MODES.FULL_DATA
 end
 
-local ws = http.websocket(remote .. "/ws")
+local ws, err = http.websocket("ws://"..remote .. "/ws")
+
+if not ws then
+    error(err)
+    return
+end
 
 while true do
     if mode == MODES.EVAL then
 
     end
-    ws.receive()
+    print(ws.receive())
 
+end
