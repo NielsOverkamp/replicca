@@ -33,9 +33,10 @@ end
 
 do
 
-    -- MOVE
+    --- MOVE
 
     function t.f(pos, n)
+        n = n or 1
         if turtle.getFuelLevel() < n then
             return false, "fuel", 0
         end
@@ -57,6 +58,7 @@ do
     end
 
     function t.u(pos, n)
+        n = n or 1
         if turtle.getFuelLevel() < n then
             return false, "fuel", 0
         end
@@ -76,6 +78,7 @@ do
     end
 
     function t.d(pos, n)
+        n = n or 1
         if turtle.getFuelLevel() < n then
             return false, "fuel", 0
         end
@@ -95,6 +98,7 @@ do
     end
 
     function t.b(pos, n)
+        n = n or 1
         if turtle.getFuelLevel() < n then
             return false, "fuel", 0
         end
@@ -119,22 +123,27 @@ do
     end
 
     function t.r(pos, n)
-        for i = 1, n do
+        n = n or 1
+        for _ = 1, n do
             turtle.turnRight()
         end
         t.turn(pos, n)
+        return true
     end
 
     function t.l(pos, n)
-        for i = 1, n do
+        n = n or 1
+        for _ = 1, n do
             turtle.turnLeft()
         end
         t.turn(pos, -n)
+        return true
     end
 
-    -- MINE AND MOVE
+    --- MINE AND MOVE
 
     function t.mf(pos, n)
+        n = n or 1
         if turtle.getFuelLevel() < n then
             return false, "fuel", 0
         end
@@ -149,6 +158,7 @@ do
     end
 
     function t.mu(pos, n)
+        n = n or 1
         if turtle.getFuelLevel() < n then
             return false, "fuel", 0
         end
@@ -163,6 +173,7 @@ do
     end
 
     function t.md(pos, n)
+        n = n or 1
         if turtle.getFuelLevel() < n then
             return false, "fuel", 0
         end
@@ -177,6 +188,7 @@ do
     end
 
     function t.mb(pos, n)
+        n = n or 1
         for i = 1, n do
             local success, err = t.b(pos, 1)
             if not success and err == "obstacle" then
@@ -192,9 +204,10 @@ do
         return true, n
     end
     
-    -- POSITION LOGIC
+    --- POSITION LOGIC
 
     function t.move_pos_horizontal(pos, n)
+        n = n or 1
         local d = pos.direction
         if d == direction.N then
             pos.coordinate.z = pos.coordinate.z - n
@@ -220,6 +233,59 @@ do
             coordinate = { x = 0, y = 0, z = 0 },
             direction = direction.N,
         }
+    end
+
+    --- COMMAND PARSING
+
+    function t.runString(pos, s)
+        local l = string.len(s)
+        local i = 1
+        while true do
+            local j = i
+            local c = string.sub(s, j, j)
+            if c == "m" then
+                c = string.sub(s, j, j+1)
+                j = j + 2
+            else
+                j = j + 1
+            end
+
+            local k = 1
+            local g = j
+            while true do
+                local tryK = tonumber(string.sub(s, j, g))
+
+                if tryK == nil then
+                    j = g
+                    break
+                else
+                    k = tryK
+                end
+                
+                if g == l then
+                    j = l + 1
+                    break
+                end
+                g = g + 1
+            end
+
+            local f = t[c]
+            if type(f) == "function" then
+                local success, err = f(pos, k)
+                if not success then
+                    return false, "Could not complete move "..c..k.." due to \""..err.."\"", i
+                end
+            else
+                return false, "Unknown command "..c, i
+            end
+
+            i = j
+            
+            if i > l then
+                break
+            end
+        end
+        return true
     end
 end
 

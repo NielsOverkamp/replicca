@@ -1,3 +1,5 @@
+dofile("update.lua")
+
 local conf_path = ".cfg"
 
 local id

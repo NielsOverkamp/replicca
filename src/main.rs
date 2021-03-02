@@ -20,9 +20,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     {
         let turtle_list = Arc::clone(&turtle_list);
         turtle_list_handle = thread::spawn(move || {
-            let connection = client_rx.recv().unwrap();
-            let turtle = TurtleState::default();
-            turtle_list.lock().unwrap().push(TaskExecutor::new(turtle, connection))
+            loop {
+                let connection = client_rx.recv().unwrap();
+                let turtle = TurtleState::default();
+                turtle_list.lock().unwrap().push(TaskExecutor::new(turtle, connection))
+            }
         })
     }
 

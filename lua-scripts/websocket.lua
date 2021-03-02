@@ -10,6 +10,7 @@ return function ()
     local COMMANDS = {
         EVAL="EVAL",
         TASK="TASK",
+        MOVE="MOVE",
     }
 
     local function connect(url)
@@ -69,7 +70,7 @@ return function ()
             if body == nil then
                 local err = "Error: Could not parse: "..msg.b
                 print(err)
-                ws = sendBlocking(ws, {r=msg.id, err=err})
+                ws = sendBlocking(ws, {r=msg.id, c="eval_response", b=err})
             else
                 setfenv(body, _ENV)
                 local res = table.pack(pcall(body))
@@ -98,11 +99,20 @@ return function ()
                 while true do
                     local msg
                     ws, msg = receiveBlocking(ws)
-                    os.queueEvent("replica:"..msg.c, msg.b)
+                    os.queueEvent("replicca:"..msg.c, msg.b)
                 end
             end
 
             task.execute(task_name, pos, sendEvents, receiveCommands)
+        elseif msg.c == COMMANDS.MOVE then
+            local success, err, completed = t.runString(pos, msg.b)
+            local body
+            if not success then
+                body = {e=err, c=completed}
+            end
+            ws = sendBlocking(ws, {c="move_response", b=body})
+        else
+            print("Unknown command "..msg.c)
         end
     end
 end

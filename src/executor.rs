@@ -5,15 +5,14 @@ use crate::turtle_websocket::{Command, UpEvent, TurtleConnection, TaskCommand};
 use json::JsonValue;
 
 pub enum Task {
-    Fell, Anon(String)
+    Fell, FirstTree, Anon(String)
 }
 
 impl Task {
     pub fn code(&self) -> &str {
         match self {
-            Task::Fell => {
-                return "fell"
-            },
+            Task::Fell => "fell",
+            Task::FirstTree => "first_tree",
             Task::Anon(s) => s.as_str()
         }
     }
@@ -21,6 +20,7 @@ impl Task {
     pub fn from_code(s: &str) -> Self {
         match s {
             "fell" => Task::Fell,
+            "first_tree" => Task::FirstTree,
             _ => Task::Anon(s.to_lowercase()),
         }
     }
@@ -89,25 +89,23 @@ impl TaskExecutor {
                 self.turtle.position = p;
                 println!("Updated turtle position: {:?}", self.turtle.position);
             },
-            UpEvent::InventoryUpdate(i) => {
-                self.turtle.inventory = i;
+            UpEvent::InventoryUpdate(di) => {
+                di.apply(&mut self.turtle.inventory);
                 println!("Updated turtle inventory: {:?}", self.turtle.inventory);
             },
             _ => {},
         }
     }
 
-    pub fn fell(&mut self) -> WebSocketResult<()> {
-        self.execute(Task::Fell, |event, exec| {
-            match event {
-                UpEvent::TaskError(e) => false,
-                UpEvent::TaskCancelled => false,
-                UpEvent::Error => false,
-                _ => {
-                    println!("unexpected event in fell event handler: {:?}", event);
-                    return true;
-                }
+    pub fn default_event_handler(event: UpEvent, exec: &mut Self) -> bool {
+        match event {
+            UpEvent::TaskError(e) => false,
+            UpEvent::TaskCancelled => false,
+            UpEvent::Error => false,
+            _ => {
+                println!("unexpected event in default event handler: {:?}", event);
+                true
             }
-        })
+        }
     }
 }

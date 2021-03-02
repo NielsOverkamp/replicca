@@ -1,6 +1,8 @@
-use crate::maneuver::Move;
-use json::JsonValue;
 use std::convert::TryInto;
+
+use json::JsonValue;
+
+use crate::maneuver::Move;
 
 #[derive(Copy, Clone, Debug)]
 pub struct Coordinate {
@@ -201,8 +203,8 @@ impl From<&JsonValue> for Item {
     fn from(jv: &JsonValue) -> Self {
         if let JsonValue::Object(o) = jv {
             Self {
-                count: o["count"].as_u8().expect("Expected number"),
-                name: o["name"].as_str().expect("Expected string").to_string(),
+                count: o["c"].as_u8().expect("Expected number"),
+                name: o["n"].as_str().expect("Expected string").to_string(),
             }
         } else {
             panic!("Expect json object got {}", jv)
@@ -254,7 +256,107 @@ impl From<&JsonValue> for Inventory {
                 slots: slots.try_into().expect("Expected 16 entries")
             }
         } else {
-            panic!("Expected json array, got {}",jv)
+            panic!("Expected json array, got {}", jv)
+        }
+    }
+}
+
+
+#[derive(Debug)]
+pub enum DeltaItem {
+    NoChange,
+    Clear,
+    CountChange(u8),
+    FullChange(Item),
+}
+
+impl DeltaItem {
+    pub fn apply(self, prev: &mut Option<Item>) {
+        match self {
+            DeltaItem::NoChange => (),
+            DeltaItem::Clear => { prev.take(); }
+            DeltaItem::CountChange(c) => {
+                prev.as_mut().unwrap().count = c;
+            },
+            DeltaItem::FullChange(i) => { prev.replace(i); }
+        };
+    }
+}
+
+impl Into<JsonValue> for &DeltaItem {
+    fn into(self) -> JsonValue {
+        match self {
+            DeltaItem::NoChange => json::object! {},
+            DeltaItem::Clear => JsonValue::Null,
+            DeltaItem::CountChange(c) => JsonValue::from(*c),
+            DeltaItem::FullChange(i) => i.into()
+        }
+    }
+}
+
+impl From<&JsonValue> for DeltaItem {
+    fn from(jv: &JsonValue) -> Self {
+        match jv {
+            JsonValue::Null => DeltaItem::Clear,
+            JsonValue::Number(c) => DeltaItem::CountChange(jv.as_u8().unwrap()),
+            JsonValue::Object(o) => {
+                if jv.has_key("n") {
+                    DeltaItem::FullChange(Item::from(jv))
+                } else {
+                    DeltaItem::NoChange
+                }
+            }
+            _ => panic!("Expected null, number or object, got {}", jv)
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct DeltaInventory {
+    slots: [DeltaItem; 16]
+}
+
+impl DeltaInventory {
+    pub fn apply(mut self, inventory: &mut Inventory) {
+        let [i1, i2, i3, i4,
+            i5, i6, i7, i8,
+            i9,i10,i11,i12,
+            i13,i14,i15,i16] = self.slots;
+        i1.apply(&mut inventory.slots[0]);
+        i2.apply(&mut inventory.slots[1]);
+        i3.apply(&mut inventory.slots[2]);
+        i4.apply(&mut inventory.slots[3]);
+        i5.apply(&mut inventory.slots[4]);
+        i6.apply(&mut inventory.slots[5]);
+        i7.apply(&mut inventory.slots[6]);
+        i8.apply(&mut inventory.slots[7]);
+        i9.apply(&mut inventory.slots[8]);
+        i10.apply(&mut inventory.slots[9]);
+        i11.apply(&mut inventory.slots[10]);
+        i12.apply(&mut inventory.slots[11]);
+        i13.apply(&mut inventory.slots[12]);
+        i14.apply(&mut inventory.slots[13]);
+        i15.apply(&mut inventory.slots[14]);
+        i16.apply(&mut inventory.slots[15]);
+    }
+}
+
+impl Into<JsonValue> for &DeltaInventory {
+    fn into(self) -> JsonValue {
+        let jv_arr = self.slots.iter().map(Into::<JsonValue>::into).collect();
+        return JsonValue::Array(jv_arr);
+    }
+}
+
+impl From<&JsonValue> for DeltaInventory {
+    fn from(jv: &JsonValue) -> Self {
+        if let JsonValue::Array(v) = jv {
+            let slots: Vec<DeltaItem> = v.iter().map(Into::<DeltaItem>::into).collect();
+            Self {
+                slots: slots.try_into().expect("Expected 16 entries")
+            }
+        } else {
+            panic!("Expected json array, got {}", jv)
         }
     }
 }
@@ -286,7 +388,7 @@ impl Default for TurtleState {
             label: String::new(),
             position: Position::default(),
             fuel_level: 0,
-            inventory: Inventory::new()
+            inventory: Inventory::new(),
         }
     }
 }

@@ -28,7 +28,7 @@ if err ~= nil then
     return
 end
 
-for _, v in ipairs({ "update.lua", "install.lua", "websocket.lua", "move.lua", "task.lua", "test.lua" }) do
+for _, v in ipairs({ "update.lua", "install.lua", "websocket.lua", "move.lua", "inventory.lua", "task.lua", "util.lua", "test_task.lua"}) do
     err = download_file(remote_url .. "/" .. v, "/" .. v)
     if err ~= nil then
         error(err)
@@ -36,9 +36,10 @@ for _, v in ipairs({ "update.lua", "install.lua", "websocket.lua", "move.lua", "
     end
 end
 
+fs.delete("/tasks")
 fs.makeDir("/tasks")
 
-for _, v in ipairs({ "fell.lua" }) do
+for _, v in ipairs({ "fell.lua", "fell_inter.lua", "first_tree.lua" }) do
     err = download_file(remote_url .. "/tasks/" .. v, "/tasks/" .. v)
     if err ~= nil then
         error(err)

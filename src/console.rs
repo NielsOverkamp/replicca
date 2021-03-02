@@ -88,9 +88,10 @@ pub fn parse_command(command: ConsoleCommand, mut input: SplitWhitespace, turtle
             let mut turtle_lock = turtle_lock.unwrap();
             let exec: &mut TaskExecutor = turtle_lock.get_mut(selected.unwrap()).unwrap();
 
-            exec.connection.send_command(Command::Eval(body));
-            if let UpEvent::EvalResponse(jv) = exec.connection.receive_event().unwrap() {
-                println!("{}", jv)
+            exec.connection.send_command(Command::Eval(body)).map_err(|_| "Sending error".to_string())?;
+            match exec.connection.receive_event().unwrap() {
+                UpEvent::EvalResponse(jv) => println!("{}", jv),
+                _ => {}
             }
             Ok(selected)
 
@@ -105,11 +106,34 @@ pub fn parse_command(command: ConsoleCommand, mut input: SplitWhitespace, turtle
             let exec: &mut TaskExecutor = turtle_lock.get_mut(selected.unwrap()).unwrap();
 
             match task.unwrap() {
-                Task::Fell => exec.fell().map_err(|e| format!("Error occurred at sending fell task: {}", e)),
-                Task::Anon(t) => Err("Anonymous tasks not supported".to_string())
+                Task::Anon(t) => Err("Anonymous tasks not supported".to_string()),
+                e => exec.execute(e, TaskExecutor::default_event_handler)
+                    .map_err(|e| format!("Error occurred at sending task: {}", e))
             }.map(|_| selected)
         }
-        ConsoleCommand::Move => {Err("Move not implemented".to_string())}
+        ConsoleCommand::Move => {
+            let s: String = input.into_iter().collect();
+            let turtle_lock = turtles.lock();
+            let mut turtle_lock = turtle_lock.unwrap();
+            let exec: &mut TaskExecutor = turtle_lock.get_mut(selected.unwrap()).unwrap();
+
+            exec.connection.send_command(Command::Move(s.clone())).map_err(|_| "Sending error".to_string())?;
+            match exec.connection.receive_event().unwrap() {
+                UpEvent::MoveResponse(Ok(())) => {
+                    println!("finished!");
+                    Ok(selected)
+                },
+                UpEvent::MoveResponse(Err((err, completed))) => {
+                    println!("Error during move: {}", err);
+                    let mut chars = s.chars();
+                    println!("completed:\t{}", chars.by_ref().take(completed-1).collect::<String>());
+                    println!("not completed:\t{}", chars.collect::<String>());
+                    Ok(selected)
+                }
+                r => Err(format!("Expected move response, got {:?}", r))
+            }
+
+        }
         ConsoleCommand::Turtle => {
             let s = match input.next() {
                 None => Err("Turtle requires 1 argument".to_string()),

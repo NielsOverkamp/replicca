@@ -65,7 +65,7 @@ local function encode_table(val, stack)
 
   stack[val] = true
 
-  if rawget(val, 1) ~= nil or next(val) == nil then
+  if (rawget(val, 1) ~= nil or next(val) == nil) and val.__json_type ~= "object" then
     -- Treat as array -- check keys are valid and it is not sparse
     local n = 0
     for k in pairs(val) do
@@ -93,8 +93,9 @@ local function encode_table(val, stack)
     for k, v in pairs(val) do
       if type(k) ~= "string" then
         error("invalid table: mixed or invalid key types")
+      elseif k ~= "__json_type" then
+        table.insert(res, encode(k, stack) .. ":" .. encode(v, stack))
       end
-      table.insert(res, encode(k, stack) .. ":" .. encode(v, stack))
     end
     stack[val] = nil
     return "{" .. table.concat(res, ",") .. "}"
