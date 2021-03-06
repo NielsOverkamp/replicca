@@ -5,17 +5,18 @@ use std::sync::mpsc;
 use std::thread::JoinHandle;
 
 use json::JsonValue;
-use websocket::{Message, OwnedMessage, WebSocketResult};
+use websocket::{Message, OwnedMessage, WebSocketResult, WebSocketError};
 use websocket::server::NoTlsAcceptor;
 use websocket::stream::sync::TcpStream;
 use websocket::sync::{Client, Server};
 
-use crate::turtle::{Inventory, DeltaInventory, Position, TurtleState};
+use crate::executor::Task;
+use crate::turtle::{DeltaInventory, Position, TurtleState};
 
 pub enum Command {
     Eval(String),
-    AnonTask(String),
-    Task(String),
+    AnonTask(JsonValue),
+    Task(Task),
     Move(String),
 }
 
@@ -30,21 +31,22 @@ impl Command {
 
     pub fn into_json(self, id: u32) -> String {
         let code = self.code();
-        match self {
-            Command::AnonTask(s) | Command::Task(s) | Command::Eval(s) | Command::Move(s) => {
-                json::stringify(json::object! {
+        json::stringify(json::object! {
+                    id: id,
                     c: code,
-                    b: s,
-                    id: id
-                })
-            }
-        }
+                    b: match self {
+                        Command::Eval(s) | Command::Move(s) => JsonValue::from(s),
+                        Command::AnonTask(jv) => jv,
+                        Command::Task(t) => (&t).into(),
+                    },
+        })
     }
 }
 
 #[derive(Debug)]
 pub enum UpEvent {
     TaskError(TaskError),
+    TaskQuestion(String),
     EvalResponse(JsonValue),
     MoveResponse(Result<(), (String, usize)>),
     TaskFinish,
@@ -61,6 +63,7 @@ impl From<&JsonValue> for UpEvent {
             if let Some(code) = o["c"].as_str() {
                 match code {
                     "task_error" => UpEvent::TaskError(TaskError::from(&o["b"])),
+                    "task_question" => UpEvent::TaskQuestion(o["b"].as_str().unwrap().to_owned()),
                     "eval_response" => UpEvent::EvalResponse(o["b"].clone()),
                     "move_response" => {
                         if jv.has_key("b") {
@@ -68,7 +71,7 @@ impl From<&JsonValue> for UpEvent {
                         } else {
                             UpEvent::MoveResponse(Ok(()))
                         }
-                    },
+                    }
                     "task_finish" => UpEvent::TaskFinish,
                     "task_cancelled" => UpEvent::TaskCancelled,
                     "state_update" => UpEvent::StateUpdate(TurtleState::from(&o["b"])),
@@ -91,6 +94,7 @@ pub enum TaskCommand {
     FinishResponse,
     Cancel,
     ErrorResponse(bool),
+    QuestionResponse(JsonValue),
 }
 
 
@@ -107,6 +111,10 @@ impl Into<JsonValue> for &TaskCommand {
                 c: "task_error_response",
                 b: *b
             },
+            TaskCommand::QuestionResponse(b) => json::object! {
+                c: "task_answer",
+                b: b.clone()
+            }
         }
     }
 }
@@ -130,7 +138,7 @@ impl TaskError {
 impl From<&JsonValue> for TaskError {
     fn from(jv: &JsonValue) -> Self {
         if jv.is_string() {
-                Self::from_code(jv.as_str().unwrap())
+            Self::from_code(jv.as_str().unwrap())
         } else {
             panic!("Expected json string, got {}", jv)
         }
@@ -153,6 +161,12 @@ pub fn spawn_websocket_listener() -> Result<(mpsc::Receiver<TurtleConnection>, J
     });
 
     return Ok((rx, handle));
+}
+
+#[derive(Debug)]
+pub enum ReceiveError {
+    WebsocketError(WebSocketError),
+    MessageError(String)
 }
 
 pub struct TurtleConnection {
@@ -180,11 +194,11 @@ impl TurtleConnection {
         self.ws_client.send_message(&Message::text(json::stringify(Into::<JsonValue>::into(&command))))
     }
 
-    pub fn receive_event(&mut self) -> Result<UpEvent, Box<dyn Error>> {
-        if let OwnedMessage::Text(s) = self.ws_client.recv_message()? {
+    pub fn receive_event(&mut self) -> Result<UpEvent, ReceiveError> {
+        if let OwnedMessage::Text(s) = self.ws_client.recv_message().map_err(ReceiveError::WebsocketError)? {
             Ok(UpEvent::from(&json::parse(s.as_str()).unwrap()))
         } else {
-            return Err("Got unexpected non text message".into());
+            return Err(ReceiveError::MessageError("Got unexpected non text message".into()));
         }
     }
 }

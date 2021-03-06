@@ -1,7 +1,7 @@
 use websocket::WebSocketResult;
 
 use crate::turtle::TurtleState;
-use crate::turtle_websocket::{Command, UpEvent, TurtleConnection, TaskCommand};
+use crate::turtle_websocket::{Command, UpEvent, TurtleConnection, TaskCommand, ReceiveError};
 use json::JsonValue;
 
 pub enum Task {
@@ -26,6 +26,18 @@ impl Task {
     }
 }
 
+impl Into<JsonValue> for &Task {
+    fn into(self) -> JsonValue {
+        json::object! {
+            n: self.code(),
+            a: match self {
+                Task::RegrowFirstTree(slot) => JsonValue::from(*slot),
+                _ => JsonValue::Null,
+            }
+        }
+    }
+}
+
 pub struct TaskExecutor {
     pub turtle: TurtleState,
     pub connection: TurtleConnection,
@@ -37,18 +49,22 @@ impl TaskExecutor {
     }
 
     // TODO deal with websocket errors better and maybe even internally
-    pub fn execute<F>(&mut self, task: Task, event_handler: F) -> WebSocketResult<()>
-        where F: Fn(UpEvent, &mut TaskExecutor) -> bool {
+    pub fn execute<E, Q>(&mut self, task: Task, event_handler: E, question_handler: Q) -> WebSocketResult<()>
+        where E: Fn(UpEvent, &mut TaskExecutor) -> bool,
+                Q: Fn(String, &mut TaskExecutor) -> JsonValue {
         let command = match task {
-            Task::Anon(_) => Command::AnonTask(task.code().to_string()),
-            _ => Command::Task(task.code().to_string())
+            Task::Anon(_) => Command::AnonTask(JsonValue::from(task.code())),
+            _ => Command::Task(task)
         };
         let id = self.connection.send_command(command)?;
         let mut continue_execution = true;
         while continue_execution {
             let event = self.connection.receive_event();
             if let Err(e) = event {
-                eprintln!("Got unknown event or whatever: {}", e);
+                match e {
+                    ReceiveError::WebsocketError(e) => return Err(e),
+                    ReceiveError::MessageError(e) => eprintln!("Got unexpected message: {}", e)
+                }
                 continue;
             }
             let event = event.unwrap();
@@ -66,6 +82,11 @@ impl TaskExecutor {
                     self.connection.send_task_command(TaskCommand::ErrorResponse(continue_execution));
                     continue_execution
                 },
+                UpEvent::TaskQuestion(q) => {
+                    let answer = question_handler(q, self);
+                    self.connection.send_task_command(TaskCommand::QuestionResponse(answer));
+                    true
+                }
                 event => {
                     if !event_handler(event, self) {
                         self.connection.send_task_command(TaskCommand::Cancel);
@@ -97,7 +118,7 @@ impl TaskExecutor {
         }
     }
 
-    pub fn default_event_handler(event: UpEvent, exec: &mut Self) -> bool {
+    pub fn default_event_handler(event: UpEvent, _: &mut Self) -> bool {
         match event {
             UpEvent::TaskError(e) => false,
             UpEvent::TaskCancelled => false,

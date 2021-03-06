@@ -5,7 +5,7 @@
 
 return function(pos)
     turtle.dig()
-    os.queueEvent("replicca:position_update", pos)
+    os.queueEvent("replicca:position_update", "UP", pos)
     turtle.select(1)
     turtle.craft()
     turtle.refuel()
@@ -23,7 +23,7 @@ return function(pos)
     turtle.select(16)
     turtle.craft()
 
-    subtask_execute("fell_inter")
-
-    os.queueEvent("replicca:inventory_update", inventory:update())
+    local h, state = subtask_execute("fell_inter")
+                
+    return state == "regrow"
 end

@@ -1,6 +1,12 @@
 local task = {}
 
+local EVENT_TYPE = {
+    FROM_REMOTE="DOWN",
+    FROM_TURTLE="UP"
+}
+
 function task.execute_function(f, args)
+    args = args or {}
     local res
     repeat
         res = table.pack(f(table.unpack(args)))
@@ -9,7 +15,7 @@ function task.execute_function(f, args)
             local _, continue = os.pullEvent("replicca:task_error_response")
             print("Continue? " .. tostring(continue))
             if not continue then
-                error("Aborting fell task, reason: " .. res[2])
+                error("Aborting task, reason: " .. res[2])
             end
         end
     until res[1]
@@ -23,13 +29,19 @@ function task.wrap(api)
             return f
         end
         return function(...)
-            task.execute_function(f, arg)
+            return task.execute_function(f, arg)
         end
     end
 
     local wrapped = { rawApi = api }
     setmetatable(wrapped, { __index = __index })
     return wrapped
+end
+
+function task.task_question(...)
+    os.queueEvent("replicca:task_question", EVENT_TYPE.FROM_TURTLE, table.unpack(arg))
+    local _, _, answer = os.pullEvent("replicca:task_answer")
+    return answer
 end
 
 local t = require("move")
@@ -39,21 +51,22 @@ local util = require("util"):new(wt)
 
 local inventory = require("inventory"):new()
 
-function task.load(name, pos)
+function task.load(name, pos, taskArgs)
     local f = dofile("tasks/" .. name .. ".lua")
     if f == nil then
         error("failed to load task " .. name .. ".lua in tasks")
     end
 
     local function subtask_execute(subtask_name)
-        task.load(subtask_name, pos)()
+        return task.load(subtask_name, pos, taskArgs)()
     end
 
     local env = {
         wt = wt,
         util = util,
         inventory = inventory,
-        subtask_execute = subtask_execute
+        task = task,
+        subtask_execute = subtask_execute,
     }
     print(inventory)
     print(inventory.update)
@@ -61,16 +74,16 @@ function task.load(name, pos)
     setfenv(f, env)
 
     return function()
-        f(pos)
+        return f(pos, taskArgs)
     end
 end
 
 
-function task.execute(name, pos, ...)
-    local subtask_exec = task.load(name, pos)
+function task.execute(name, pos, taskArgs, ...)
+    local subtask_exec = task.load(name, pos, taskArgs)
     local function task_exec()
         subtask_exec()
-        os.queueEvent("replicca:task_finish")
+        os.queueEvent("replicca:task_finish", EVENT_TYPE.FROM_TURTLE)
         os.pullEvent("replicca:task_finish_response")
     end
 

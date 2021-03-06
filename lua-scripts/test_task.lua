@@ -9,4 +9,4 @@ local task = require("task")
 local move = require("move")
 local pos = move.origin()
 
-task.execute(tArgs[1], pos, function() while true do print(os.pullEvent("replicca:task_error")) end end)
+task.execute(tArgs[1], pos, table.pack(table.unpack(tArgs, 2, #tArgs)), function() while true do print(os.pullEvent("replicca:task_error")) end end)

@@ -6,6 +6,7 @@ use crate::TurtleList;
 use crate::turtle_websocket::{Command, UpEvent};
 use crate::executor::TaskExecutor;
 use crate::executor::Task;
+use json::JsonValue;
 
 
 pub enum ConsoleCommand {
@@ -31,13 +32,12 @@ impl FromStr for ConsoleCommand {
 pub fn spawn_console(mut turtles: TurtleList) -> Result<JoinHandle<()>, Box<dyn std::error::Error>> {
     Ok(thread::spawn(move || {
         let mut stdin = stdin();
-        let mut handle = stdin.lock();
         let mut selected = None;
         loop {
             print!("> ");
             stdout().flush();
             let mut input = String::new();
-            match handle.read_line(&mut input) {
+            match stdin.read_line(&mut input) {
                 Ok(0) => {
                     break;
                 }
@@ -62,6 +62,25 @@ pub fn spawn_console(mut turtles: TurtleList) -> Result<JoinHandle<()>, Box<dyn 
             }
         }
     }))
+}
+
+fn stdin_question_handler(question: String, _: &mut TaskExecutor) -> JsonValue {
+    match question.as_str() {
+        "replant" => {
+            println!("Replant tree? [Y/n]");
+            stdout().flush();
+            let mut s = String::new();
+            stdin().read_line(&mut s);
+            match s.as_str() {
+                "n" => JsonValue::Boolean(false),
+                _ => JsonValue::Boolean(true)
+            }
+        },
+        _ => {
+            println!("Unknown question {}", question);
+            JsonValue::Null
+        }
+    }
 }
 
 pub fn parse_command(command: ConsoleCommand, mut input: SplitWhitespace, turtles: &mut TurtleList, selected: Option<usize>) -> Result<Option<usize>, String> {
@@ -107,7 +126,7 @@ pub fn parse_command(command: ConsoleCommand, mut input: SplitWhitespace, turtle
 
             match task.unwrap() {
                 Task::Anon(t) => Err("Anonymous tasks not supported".to_string()),
-                e => exec.execute(e, TaskExecutor::default_event_handler)
+                e => exec.execute(e, TaskExecutor::default_event_handler, stdin_question_handler)
                     .map_err(|e| format!("Error occurred at sending task: {}", e))
             }.map(|_| selected)
         }

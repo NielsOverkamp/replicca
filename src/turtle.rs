@@ -186,8 +186,8 @@ impl From<&JsonValue> for Position {
 
 #[derive(Debug)]
 pub struct Item {
-    count: u8,
-    name: String,
+    pub count: u8,
+    pub name: String,
 }
 
 impl Into<JsonValue> for &Item {
@@ -227,6 +227,14 @@ impl Inventory {
 
     pub fn coord_to_slot(x: u8, y: u8) -> u8 {
         x + 4 * y
+    }
+
+    pub fn find<P>(&self, mut predicate: P) -> Option<(&Item, usize)>
+        where P: FnMut(&Item) -> bool {
+        self.slots.iter().zip(1usize..)
+            .filter(|(i, s)| i.is_some())
+            .map(|(i, s)| (i.as_ref().unwrap(), s))
+            .find(|(i, s)| predicate(i))
     }
 }
 

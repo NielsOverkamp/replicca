@@ -13,6 +13,11 @@ return function ()
         MOVE="MOVE",
     }
 
+    local EVENT_TYPE = {
+        FROM_REMOTE="DOWN",
+        FROM_TURTLE="UP"
+    }
+
     local function connect(url)
         local ws, err = http.websocket("ws://"..url .. "/ws")
 
@@ -82,13 +87,13 @@ return function ()
                 ws = sendBlocking(ws, {r=msg.id, c="eval_response", b=res})
             end
         elseif msg.c == COMMANDS.TASK then
-            local task_name = msg.b
+            local task_description = msg.b
 
             local function sendEvents()
                 while true do
-                    local ev, data = os.pullEvent()
+                    local ev, type, data = os.pullEvent()
                     print(ev, data)
-                    if string.sub(ev, 1, 9) == "replicca:" then
+                    if type == EVENT_TYPE.FROM_TURTLE and string.sub(ev, 1, 9) == "replicca:" then
                         local event = string.sub(ev, 10)
                         ws = sendBlocking(ws, {c=event, b=data})
                     end
@@ -99,11 +104,11 @@ return function ()
                 while true do
                     local msg
                     ws, msg = receiveBlocking(ws)
-                    os.queueEvent("replicca:"..msg.c, msg.b)
+                    os.queueEvent("replicca:"..msg.c, EVENT_TYPE.FROM_REMOTE, msg.b)
                 end
             end
 
-            task.execute(task_name, pos, sendEvents, receiveCommands)
+            task.execute(task_description.n, pos, task_description.arg, sendEvents, receiveCommands)
         elseif msg.c == COMMANDS.MOVE then
             local success, err, completed = t.runString(pos, msg.b)
             local body
