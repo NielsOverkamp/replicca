@@ -1,7 +1,7 @@
 use std::str::{FromStr, SplitWhitespace};
 use std::thread;
 use std::thread::JoinHandle;
-use std::io::{stdin, BufRead, stdout, Write};
+use std::io::{stdin, stdout, Write};
 use crate::TurtleList;
 use crate::turtle_websocket::{Command, UpEvent};
 use crate::executor::TaskExecutor;
@@ -31,11 +31,11 @@ impl FromStr for ConsoleCommand {
 
 pub fn spawn_console(mut turtles: TurtleList) -> Result<JoinHandle<()>, Box<dyn std::error::Error>> {
     Ok(thread::spawn(move || {
-        let mut stdin = stdin();
+        let stdin = stdin();
         let mut selected = None;
         loop {
             print!("> ");
-            stdout().flush();
+            stdout().flush().unwrap();
             let mut input = String::new();
             match stdin.read_line(&mut input) {
                 Ok(0) => {
@@ -68,9 +68,9 @@ fn stdin_question_handler(question: String, _: &mut TaskExecutor) -> JsonValue {
     match question.as_str() {
         "replant" => {
             println!("Replant tree? [Y/n]");
-            stdout().flush();
+            stdout().flush().unwrap();
             let mut s = String::new();
-            stdin().read_line(&mut s);
+            stdin().read_line(&mut s).unwrap();
             match s.as_str() {
                 "n" => JsonValue::Boolean(false),
                 _ => JsonValue::Boolean(true)
@@ -107,8 +107,8 @@ pub fn parse_command(command: ConsoleCommand, mut input: SplitWhitespace, turtle
             let mut turtle_lock = turtle_lock.unwrap();
             let exec: &mut TaskExecutor = turtle_lock.get_mut(selected.unwrap()).unwrap();
 
-            exec.connection.send_command(Command::Eval(body)).map_err(|_| "Sending error".to_string())?;
-            match exec.connection.receive_event().unwrap() {
+            exec.connection.send_command(Command::Eval(body));
+            match exec.connection.receive_event().unwrap().0 {
                 UpEvent::EvalResponse(jv) => println!("{}", jv),
                 _ => {}
             }
@@ -125,10 +125,17 @@ pub fn parse_command(command: ConsoleCommand, mut input: SplitWhitespace, turtle
             let exec: &mut TaskExecutor = turtle_lock.get_mut(selected.unwrap()).unwrap();
 
             match task.unwrap() {
-                Task::Anon(t) => Err("Anonymous tasks not supported".to_string()),
+                Task::Anon(_) => Err("Anonymous tasks not supported".to_string()),
                 e => exec.execute(e, TaskExecutor::default_event_handler, stdin_question_handler)
+                    .and_then(|success| {
+                        if success {
+                            Ok(selected)
+                        } else {
+                            Err("Task failed".into())
+                        }
+                    })
                     .map_err(|e| format!("Error occurred at sending task: {}", e))
-            }.map(|_| selected)
+            }
         }
         ConsoleCommand::Move => {
             let s: String = input.into_iter().collect();
@@ -136,8 +143,8 @@ pub fn parse_command(command: ConsoleCommand, mut input: SplitWhitespace, turtle
             let mut turtle_lock = turtle_lock.unwrap();
             let exec: &mut TaskExecutor = turtle_lock.get_mut(selected.unwrap()).unwrap();
 
-            exec.connection.send_command(Command::Move(s.clone())).map_err(|_| "Sending error".to_string())?;
-            match exec.connection.receive_event().unwrap() {
+            exec.connection.send_command(Command::Move(s.clone()));
+            match exec.connection.receive_event().unwrap().0 {
                 UpEvent::MoveResponse(Ok(())) => {
                     println!("finished!");
                     Ok(selected)

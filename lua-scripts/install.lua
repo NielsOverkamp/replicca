@@ -39,7 +39,7 @@ end
 fs.delete("/tasks")
 fs.makeDir("/tasks")
 
-for _, v in ipairs({ "fell.lua", "fell_inter.lua", "first_tree.lua" }) do
+for _, v in ipairs({ "fell.lua", "fell_inter.lua", "first_tree.lua", "refuel_logs.lua" }) do
     err = download_file(remote_url .. "/tasks/" .. v, "/tasks/" .. v)
     if err ~= nil then
         error(err)

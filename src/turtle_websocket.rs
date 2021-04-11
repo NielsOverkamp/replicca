@@ -4,14 +4,18 @@ use std::num::Wrapping;
 use std::sync::mpsc;
 use std::thread::JoinHandle;
 
+use hyper::http::uri;
 use json::JsonValue;
-use websocket::{Message, OwnedMessage, WebSocketResult, WebSocketError};
+use websocket::{Message, OwnedMessage, WebSocketError, WebSocketResult};
 use websocket::server::NoTlsAcceptor;
+use websocket::server::sync::AcceptResult;
 use websocket::stream::sync::TcpStream;
 use websocket::sync::{Client, Server};
+use websocket::sync::server::Upgrade;
 
 use crate::executor::Task;
 use crate::turtle::{DeltaInventory, Position, TurtleState};
+use std::collections::HashMap;
 
 pub enum Command {
     Eval(String),
@@ -29,17 +33,16 @@ impl Command {
         }
     }
 
-    pub fn into_json(self, id: u32) -> String {
+    pub fn into_json(self) -> JsonValue {
         let code = self.code();
-        json::stringify(json::object! {
-                    id: id,
+        json::object! {
                     c: code,
                     b: match self {
                         Command::Eval(s) | Command::Move(s) => JsonValue::from(s),
                         Command::AnonTask(jv) => jv,
                         Command::Task(t) => (&t).into(),
                     },
-        })
+        }
     }
 }
 
@@ -154,9 +157,32 @@ pub fn spawn_websocket_listener() -> Result<(mpsc::Receiver<TurtleConnection>, J
     let (tx, rx) = mpsc::channel();
 
     let handle = thread::spawn(move || {
+        let mut reconnect_map: HashMap<u32, mpsc::Sender<Client<TcpStream>>> = HashMap::new();
+
         for connection in server.filter_map(Result::ok) {
-            let mut client: Client<TcpStream> = connection.accept().unwrap();
-            tx.send(TurtleConnection::new(client));
+            let connection: Upgrade<TcpStream> = connection;
+
+            let req_uri = connection.request.subject.1.clone();
+            let hyper_uri = req_uri.to_string().parse::<uri::Uri>().unwrap();
+            let mut path_iter = hyper_uri.path().split("/");
+            let id =
+                path_iter.next().filter(|s| (*s).eq(""))
+                    .and_then(|_| path_iter.next()).filter(|s| (*s).eq("ws"))
+                    .and_then(|_| path_iter.next())
+                    .and_then(|s| s.parse::<u32>().ok())
+                    .ok_or(format!("Expected ws request on /ws/{{id}}, got {}", req_uri));
+            if let Ok(id) = id {
+                let client: Client<TcpStream> = connection.accept().unwrap();
+                if reconnect_map.contains_key(&id) {
+                    reconnect_map.get(&id).unwrap().send(client);
+                } else {
+                    let (recon_tx, recon_rx) = mpsc::channel();
+                    reconnect_map.insert(id, recon_tx);
+                    tx.send(TurtleConnection::new(client, recon_rx)).unwrap();
+                }
+            } else {
+                eprintln!("{}", id.unwrap_err())
+            }
         }
     });
 
@@ -166,39 +192,94 @@ pub fn spawn_websocket_listener() -> Result<(mpsc::Receiver<TurtleConnection>, J
 #[derive(Debug)]
 pub enum ReceiveError {
     WebsocketError(WebSocketError),
-    MessageError(String)
+    MessageError(String),
 }
 
 pub struct TurtleConnection {
     ws_client: Client<TcpStream>,
+    reconnect_receiver: mpsc::Receiver<Client<TcpStream>>,
     last_id: Wrapping<u32>,
 }
 
 
 impl TurtleConnection {
-    pub fn new(client: Client<TcpStream>) -> Self {
+    pub fn new(client: Client<TcpStream>, reconnect_receiver: mpsc::Receiver<Client<TcpStream>>) -> Self {
         Self {
             ws_client: client,
-            last_id: Wrapping(0u32),
+            reconnect_receiver,
+            last_id: Wrapping(1u32),
         }
     }
 
-    pub fn send_command(&mut self, command: Command) -> WebSocketResult<u32> {
-        let id = self.last_id.0;
+    pub fn send(&mut self, message: String) {
+        println!("Sending: {}", message);
+        loop {
+            match self.ws_client.send_message(&Message::text(&message)) {
+                Ok(()) => return,
+                Err(e) => {
+                    eprintln!("Websocket receive got error: {}", e);
+                    self.ws_client = self.reconnect_receiver.recv().unwrap();
+                }
+            }
+        }
+
+    }
+
+    pub fn receive(&mut self) -> Result<String, ReceiveError> {
+        loop {
+            match self.ws_client.recv_message() {
+                Ok(OwnedMessage::Text(m)) => {
+                    println!("Received: {}", m);
+                    return Ok(m)
+                },
+                Ok(_) => return Err(ReceiveError::MessageError("Got unexpected non text message".into())),
+                Err(e) => {
+                    eprintln!("Websocket receive got error: {}", e);
+                    self.ws_client = self.reconnect_receiver.recv().unwrap();
+                    println!("Reconnected");
+                }
+            }
+        }
+    }
+
+    pub fn send_command(&mut self, command: Command) -> u32 {
+        let mid = self.last_id.0;
         self.last_id += Wrapping(1u32);
-        let _ = self.ws_client.send_message(&Message::text(command.into_json(id)))?;
-        return Ok(id);
+        self.send(json::stringify(
+            json::object! {
+                mid: mid,
+                cid: 0,
+                c: "COMMAND",
+                b: command.into_json()
+            }));
+        mid
     }
 
-    pub fn send_task_command(&mut self, command: TaskCommand) -> WebSocketResult<()> {
-        self.ws_client.send_message(&Message::text(json::stringify(Into::<JsonValue>::into(&command))))
+    pub fn send_task_command(&mut self, command: TaskCommand, cid: u32) -> u32 {
+        let mid = self.last_id.0;
+        self.last_id += Wrapping(1u32);
+
+        self.send(json::stringify(
+            json::object! {
+                mid: mid,
+                cid: cid,
+                c: "TASK_EVENT",
+                b: Into::<JsonValue>::into(&command)
+            }));
+        mid
     }
 
-    pub fn receive_event(&mut self) -> Result<UpEvent, ReceiveError> {
-        if let OwnedMessage::Text(s) = self.ws_client.recv_message().map_err(ReceiveError::WebsocketError)? {
-            Ok(UpEvent::from(&json::parse(s.as_str()).unwrap()))
+    pub fn receive_event(&mut self) -> Result<(UpEvent, u32, u32), ReceiveError> {
+        let s = self.receive()?;
+        let jv = json::parse(s.as_str())
+            .map_err(|_| ReceiveError::MessageError(format!("Could not parse json string {}", s)))?;
+        if let JsonValue::Object(_) = &jv {
+            let mid: u32 = jv["mid"].as_u32().unwrap_or(0);
+            let cid: u32 = jv["cid"].as_u32().unwrap_or(0);
+            // TODO parse from Object i/o JsonValue
+            return Ok((UpEvent::from(&jv), mid, cid));
         } else {
-            return Err(ReceiveError::MessageError("Got unexpected non text message".into()));
+            return Err(ReceiveError::MessageError(format!("Expected json object, got {:?}", jv)));
         }
     }
 }

@@ -2,7 +2,8 @@ dofile("update.lua")
 
 local conf_path = ".cfg"
 
-local id
+-- TODO make id functional
+local id = 1
 if fs.exists(conf_path) then
     local f = fs.open(conf_path, "r")
     id = f.readLine()

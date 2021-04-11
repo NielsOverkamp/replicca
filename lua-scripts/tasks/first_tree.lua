@@ -5,7 +5,7 @@
 
 return function(pos)
     turtle.dig()
-    os.queueEvent("replicca:position_update", "UP", pos)
+    task:send_event("position_update",pos)
     turtle.select(1)
     turtle.craft()
     turtle.refuel()

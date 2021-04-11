@@ -229,12 +229,22 @@ impl Inventory {
         x + 4 * y
     }
 
+    pub fn item_iter(&self) -> impl Iterator<Item=(&Item, usize)> {
+        self.slots.iter().zip(1usize..)
+            .filter(|(i, _)| i.is_some())
+            .map(|(i, s)| (i.as_ref().unwrap(), s))
+    }
+
     pub fn find<P>(&self, mut predicate: P) -> Option<(&Item, usize)>
         where P: FnMut(&Item) -> bool {
-        self.slots.iter().zip(1usize..)
-            .filter(|(i, s)| i.is_some())
-            .map(|(i, s)| (i.as_ref().unwrap(), s))
-            .find(|(i, s)| predicate(i))
+            let x = self.item_iter().find(|(i, _)| predicate(i));
+        x
+    }
+
+    pub fn find_all<P>(&self, mut predicate: P) -> impl Iterator<Item=(&Item, usize)>
+        where P: FnMut(&Item) -> bool {
+        self.item_iter()
+            .filter(move |(i, _)| predicate(i))
     }
 }
 
@@ -306,8 +316,8 @@ impl From<&JsonValue> for DeltaItem {
     fn from(jv: &JsonValue) -> Self {
         match jv {
             JsonValue::Null => DeltaItem::Clear,
-            JsonValue::Number(c) => DeltaItem::CountChange(jv.as_u8().unwrap()),
-            JsonValue::Object(o) => {
+            JsonValue::Number(_) => DeltaItem::CountChange(jv.as_u8().unwrap()),
+            JsonValue::Object(_) => {
                 if jv.has_key("n") {
                     DeltaItem::FullChange(Item::from(jv))
                 } else {
@@ -325,7 +335,7 @@ pub struct DeltaInventory {
 }
 
 impl DeltaInventory {
-    pub fn apply(mut self, inventory: &mut Inventory) {
+    pub fn apply(self, inventory: &mut Inventory) {
         let [i1, i2, i3, i4,
             i5, i6, i7, i8,
             i9,i10,i11,i12,

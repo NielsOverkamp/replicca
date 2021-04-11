@@ -9,3 +9,4 @@ edition = "2018"
 [dependencies]
 websocket = "0.24.0"
 json = "0.12.4"
+hyper = "0.14.5"

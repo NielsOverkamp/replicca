@@ -3,9 +3,12 @@ use websocket::WebSocketResult;
 use crate::turtle::TurtleState;
 use crate::turtle_websocket::{Command, UpEvent, TurtleConnection, TaskCommand, ReceiveError};
 use json::JsonValue;
+use std::error::Error;
 
 pub enum Task {
-    Fell, FirstTree, Anon(String)
+    Fell, FirstTree,
+    RefuelLogs(u8, u8),
+    Anon(String)
 }
 
 impl Task {
@@ -13,6 +16,7 @@ impl Task {
         match self {
             Task::Fell => "fell",
             Task::FirstTree => "first_tree",
+            Task::RefuelLogs(_, _) => "refuel_logs",
             Task::Anon(s) => s.as_str()
         }
     }
@@ -29,9 +33,12 @@ impl Task {
 impl Into<JsonValue> for &Task {
     fn into(self) -> JsonValue {
         json::object! {
-            n: self.code(),
-            a: match self {
-                Task::RegrowFirstTree(slot) => JsonValue::from(*slot),
+            c: self.code(),
+            b: match self {
+                Task::RefuelLogs(slot, count) => json::object! {
+                    slot: *slot,
+                    count: *count
+                },
                 _ => JsonValue::Null,
             }
         }
@@ -49,47 +56,52 @@ impl TaskExecutor {
     }
 
     // TODO deal with websocket errors better and maybe even internally
-    pub fn execute<E, Q>(&mut self, task: Task, event_handler: E, question_handler: Q) -> WebSocketResult<()>
+    pub fn execute<E, Q>(&mut self, task: Task, event_handler: E, question_handler: Q) -> Result<bool, Box<dyn Error>>
         where E: Fn(UpEvent, &mut TaskExecutor) -> bool,
                 Q: Fn(String, &mut TaskExecutor) -> JsonValue {
         let command = match task {
             Task::Anon(_) => Command::AnonTask(JsonValue::from(task.code())),
             _ => Command::Task(task)
         };
-        let id = self.connection.send_command(command)?;
+        let mid = self.connection.send_command(command);
         let mut continue_execution = true;
+        let mut successful_execution = true;
         while continue_execution {
-            let event = self.connection.receive_event();
-            if let Err(e) = event {
+            let result = self.connection.receive_event();
+            if let Err(e) = result {
                 match e {
-                    ReceiveError::WebsocketError(e) => return Err(e),
+                    ReceiveError::WebsocketError(e) => return Err(e.into()),
                     ReceiveError::MessageError(e) => eprintln!("Got unexpected message: {}", e)
                 }
                 continue;
             }
-            let event = event.unwrap();
+            let (event, mid, _) = result.unwrap();
             continue_execution = match event {
                 UpEvent::TaskFinish => {
-                    self.connection.send_task_command(TaskCommand::FinishResponse);
+                    self.connection.send_task_command(TaskCommand::FinishResponse, mid);
                     false
                 },
+                UpEvent::TaskCancelled => {
+                    successful_execution = false;
+                    false
+                }
                 UpEvent::StateUpdate(_) | UpEvent::PositionUpdate(_) | UpEvent::InventoryUpdate(_) => {
                     self.handle_update_event(event);
                     true
                 }
                 UpEvent::TaskError(_) => {
                     let continue_execution = event_handler(event, self);
-                    self.connection.send_task_command(TaskCommand::ErrorResponse(continue_execution));
+                    self.connection.send_task_command(TaskCommand::ErrorResponse(continue_execution), mid);
                     continue_execution
                 },
                 UpEvent::TaskQuestion(q) => {
                     let answer = question_handler(q, self);
-                    self.connection.send_task_command(TaskCommand::QuestionResponse(answer));
+                    self.connection.send_task_command(TaskCommand::QuestionResponse(answer), mid);
                     true
                 }
                 event => {
                     if !event_handler(event, self) {
-                        self.connection.send_task_command(TaskCommand::Cancel);
+                        self.connection.send_task_command(TaskCommand::Cancel, mid);
                         false
                     } else {
                         true
@@ -97,7 +109,7 @@ impl TaskExecutor {
                 }
             };
         };
-        Ok(())
+        Ok(successful_execution)
     }
 
     pub fn handle_update_event(&mut self, event: UpEvent) {
@@ -120,13 +132,17 @@ impl TaskExecutor {
 
     pub fn default_event_handler(event: UpEvent, _: &mut Self) -> bool {
         match event {
-            UpEvent::TaskError(e) => false,
-            UpEvent::TaskCancelled => false,
+            UpEvent::TaskError(_) => false,
             UpEvent::Error => false,
             _ => {
                 println!("unexpected event in default event handler: {:?}", event);
                 true
             }
         }
+    }
+
+    pub fn null_question_handler(question: String, _: &mut Self) -> JsonValue {
+        eprintln!("Got question {} while expecting no questions", question);
+        return JsonValue::Null
     }
 }

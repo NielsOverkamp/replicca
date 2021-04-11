@@ -51,8 +51,4 @@ function inventory:update()
     return delta
 end
 
-function inventory:updateAndEvent()
-    os.queueEvent("replicca:inventory_update", self:update())
-end
-
 return inventory

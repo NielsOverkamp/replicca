@@ -1,9 +1,9 @@
 return function(pos)
     print("starting fell")
     wt.mf(pos, 1)
-    os.queueEvent("replicca:position_update", "UP", pos)
+    task:send_event("position_update", pos)
 
     subtask_execute("fell_inter")
     print("done")
-    os.queueEvent("replicca:inventory_update", "UP", inventory:update())
+    task:send_event("inventory_update", inventory:update())
 end
